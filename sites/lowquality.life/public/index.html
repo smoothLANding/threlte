@@ -131,8 +131,8 @@
         transform: scale(1.045);
         pointer-events: none;
         transition:
-          opacity 1600ms cubic-bezier(0.25, 0.1, 0.25, 1),
-          transform 2600ms cubic-bezier(0.16, 1, 0.3, 1);
+          opacity 900ms cubic-bezier(0.25, 0.1, 0.25, 1),
+          transform 3200ms cubic-bezier(0.16, 1, 0.3, 1);
       }
 
       .photo.in {
@@ -154,7 +154,7 @@
         position: absolute;
         image-rendering: pixelated;
         image-rendering: crisp-edges;
-        transition: opacity 700ms ease-out;
+        transition: opacity 500ms ease-out;
       }
 
       .photo canvas.gone {
@@ -249,26 +249,33 @@
           const sctx = scratch.getContext('2d');
           if (!ctx || !sctx) return Promise.resolve();
 
+          // Discrete steps, geometric in resolution, so it reads like a progressive
+          // image loading: 6 columns -> ... -> full resolution.
+          const steps = 12;
           const minCols = 6;
           const maxCols = canvas.width;
           const start = performance.now();
+          let lastStep = -1;
 
           return new Promise((done) => {
             function frame(now) {
               const t = Math.min(1, (now - start) / duration);
-              const eased = 1 - Math.pow(1 - t, 3);
-              // Exponential ramp keeps the early frames chunky and the late frames near-final.
-              const cols = Math.max(minCols, Math.round(minCols * Math.pow(maxCols / minCols, eased)));
-              const rows = Math.max(1, Math.round(cols * (canvas.height / canvas.width)));
+              const step = Math.min(steps - 1, Math.floor(t * steps));
 
-              scratch.width = cols;
-              scratch.height = rows;
-              sctx.imageSmoothingEnabled = true;
-              sctx.drawImage(img, 0, 0, cols, rows);
+              if (step !== lastStep) {
+                lastStep = step;
+                const cols = Math.round(minCols * Math.pow(maxCols / minCols, step / (steps - 1)));
+                const rows = Math.max(1, Math.round(cols * (canvas.height / canvas.width)));
 
-              ctx.imageSmoothingEnabled = false;
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
+                scratch.width = cols;
+                scratch.height = rows;
+                sctx.imageSmoothingEnabled = true;
+                sctx.drawImage(img, 0, 0, cols, rows);
+
+                ctx.imageSmoothingEnabled = false;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
+              }
 
               if (t < 1 && !skipped) requestAnimationFrame(frame);
               else done();
@@ -286,10 +293,10 @@
 
           photo.classList.add('in');
           if (!reduce && !skipped && img.naturalWidth) {
-            await pixelReveal(2000);
+            await pixelReveal(2600);
           }
           canvas.classList.add('gone');
-          await wait(800);
+          await wait(600);
           canvas.remove();
           title.remove();
         }
