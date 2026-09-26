@@ -7,10 +7,9 @@
     // Any path (e.g. /anything) still shows the photo.
     "not_found_handling": "single-page-application"
   },
-  // Custom domains: Cloudflare creates the DNS records automatically
+  // Custom domain: Cloudflare creates the DNS record and certificate automatically
   // because the zone already lives in this account (bought via Registrar).
-  "routes": [
-    { "pattern": "lowquality.life", "custom_domain": true },
-    { "pattern": "www.lowquality.life", "custom_domain": true }
-  ]
+  "routes": [{ "pattern": "lowquality.life", "custom_domain": true }],
+  // Reachable at lowquality.life only; no *.workers.dev URL.
+  "workers_dev": false
 }
