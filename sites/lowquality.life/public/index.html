@@ -12,13 +12,22 @@
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="data:," />
     <link rel="preload" as="image" href="/photo.jpg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,300;1,400&display=swap"
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      href="/fonts/cormorant-garamond-italic-latin.woff2"
+      crossorigin
     />
     <style>
+      @font-face {
+        font-family: 'Cormorant Garamond';
+        font-style: italic;
+        font-weight: 300 700;
+        font-display: swap;
+        src: url('/fonts/cormorant-garamond-italic-latin.woff2') format('woff2');
+      }
+
       :root {
         --ink: #e4ded2;
         --stagger: 42ms;
@@ -81,25 +90,17 @@
 
       .ch {
         display: inline-block;
+        color: var(--ink);
         opacity: 0;
         filter: blur(12px);
         transform: translateY(0.45em);
-        color: transparent;
-        background: linear-gradient(
-          105deg,
-          var(--ink) 0%,
-          var(--ink) 30%,
-          #ffffff 50%,
-          var(--ink) 70%,
-          var(--ink) 100%
-        );
-        background-size: 320% 100%;
-        background-position: 100% 0;
-        -webkit-background-clip: text;
-        background-clip: text;
+      }
+
+      /* Letters only start moving once the font is ready (or the wait timed out). */
+      .ready .ch {
         animation:
           rise var(--rise) cubic-bezier(0.2, 0.75, 0.2, 1) forwards,
-          sweep 1600ms cubic-bezier(0.45, 0, 0.25, 1) forwards;
+          sweep 1500ms cubic-bezier(0.45, 0, 0.25, 1) forwards;
         animation-delay:
           calc(var(--i) * var(--stagger)),
           calc(2100ms + var(--i) * 34ms);
@@ -114,8 +115,17 @@
       }
 
       @keyframes sweep {
-        to {
-          background-position: 0% 0;
+        0% {
+          color: var(--ink);
+          text-shadow: 0 0 0 rgba(255, 255, 255, 0);
+        }
+        45% {
+          color: #ffffff;
+          text-shadow: 0 0 22px rgba(255, 255, 255, 0.45);
+        }
+        100% {
+          color: var(--ink);
+          text-shadow: 0 0 0 rgba(255, 255, 255, 0);
         }
       }
 
@@ -161,8 +171,21 @@
         opacity: 0;
       }
 
+      /* If the script fails for any reason, just show the photo. */
+      .failed .title {
+        display: none;
+      }
+      .failed .photo {
+        opacity: 1;
+        transform: none;
+        transition: none;
+      }
+      .failed canvas {
+        display: none;
+      }
+
       @media (prefers-reduced-motion: reduce) {
-        .ch {
+        .ready .ch {
           animation-duration: 600ms, 1ms;
           animation-delay: 0ms, 0ms;
         }
@@ -174,6 +197,20 @@
         }
       }
     </style>
+    <noscript>
+      <style>
+        .title {
+          display: none;
+        }
+        .photo {
+          opacity: 1;
+          transform: none;
+        }
+        canvas {
+          display: none;
+        }
+      </style>
+    </noscript>
   </head>
   <body>
     <main class="stage">
@@ -187,121 +224,136 @@
 
     <script>
       (() => {
-        const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const root = document.documentElement;
         const title = document.getElementById('title');
         const photo = document.getElementById('photo');
         const img = document.getElementById('img');
         const canvas = document.getElementById('pixels');
 
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const fail = () => root.classList.add('failed');
 
-        // Split the headline into per-letter spans so each glyph can animate on its own.
-        const text = title.textContent;
-        title.textContent = '';
-        let i = 0;
-        for (const word of text.split(' ')) {
-          const w = document.createElement('span');
-          w.className = 'word';
-          for (const letter of word) {
-            const c = document.createElement('span');
-            c.className = 'ch';
-            c.style.setProperty('--i', i++);
-            c.textContent = letter;
-            w.appendChild(c);
-          }
-          title.appendChild(w);
-          title.appendChild(document.createTextNode(' '));
-        }
+        try {
+          const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-        const letterCount = i;
-        const stagger = reduce ? 0 : 42;
-        const rise = reduce ? 600 : 1100;
-        // Hold long enough for the light sweep on the last letter to finish.
-        const titleDone = letterCount * stagger + rise + (reduce ? 400 : 2400);
-
-        let skipped = false;
-        let resolveSkip;
-        const skip = new Promise((r) => (resolveSkip = r));
-        const onSkip = () => {
-          skipped = true;
-          resolveSkip();
-        };
-        addEventListener('pointerdown', onSkip, { once: true });
-        addEventListener('keydown', onSkip, { once: true });
-
-        const race = (ms) => Promise.race([wait(ms), skip]);
-
-        // Progressive "low quality -> full quality" reveal: paint the photo at a coarse
-        // resolution and refine it toward the real image, then hand off to the <img>.
-        function pixelReveal(duration) {
-          // Layout offsets ignore the parent's in-flight scale transform.
-          const { offsetLeft: x, offsetTop: y, offsetWidth: w, offsetHeight: h } = img;
-          const dpr = Math.min(devicePixelRatio || 1, 2);
-          canvas.style.left = x + 'px';
-          canvas.style.top = y + 'px';
-          canvas.style.width = w + 'px';
-          canvas.style.height = h + 'px';
-          canvas.width = Math.round(w * dpr);
-          canvas.height = Math.round(h * dpr);
-
-          const ctx = canvas.getContext('2d');
-          const scratch = document.createElement('canvas');
-          const sctx = scratch.getContext('2d');
-          if (!ctx || !sctx) return Promise.resolve();
-
-          // Discrete steps, geometric in resolution, so it reads like a progressive
-          // image loading: 6 columns -> ... -> full resolution.
-          const steps = 12;
-          const minCols = 6;
-          const maxCols = canvas.width;
-          const start = performance.now();
-          let lastStep = -1;
-
-          return new Promise((done) => {
-            function frame(now) {
-              const t = Math.min(1, (now - start) / duration);
-              const step = Math.min(steps - 1, Math.floor(t * steps));
-
-              if (step !== lastStep) {
-                lastStep = step;
-                const cols = Math.round(minCols * Math.pow(maxCols / minCols, step / (steps - 1)));
-                const rows = Math.max(1, Math.round(cols * (canvas.height / canvas.width)));
-
-                scratch.width = cols;
-                scratch.height = rows;
-                sctx.imageSmoothingEnabled = true;
-                sctx.drawImage(img, 0, 0, cols, rows);
-
-                ctx.imageSmoothingEnabled = false;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
-              }
-
-              if (t < 1 && !skipped) requestAnimationFrame(frame);
-              else done();
+          // Split the headline into per-letter spans so each glyph can animate on its own.
+          const text = title.textContent;
+          title.textContent = '';
+          let i = 0;
+          for (const word of text.split(' ')) {
+            const w = document.createElement('span');
+            w.className = 'word';
+            for (const letter of word) {
+              const c = document.createElement('span');
+              c.className = 'ch';
+              c.style.setProperty('--i', i++);
+              c.textContent = letter;
+              w.appendChild(c);
             }
-            requestAnimationFrame(frame);
-          });
-        }
-
-        async function run() {
-          const ready = img.decode().catch(() => {});
-
-          await race(titleDone);
-          title.classList.add('out');
-          await Promise.all([race(reduce ? 350 : 700), ready]);
-
-          photo.classList.add('in');
-          if (!reduce && !skipped && img.naturalWidth) {
-            await pixelReveal(2600);
+            title.appendChild(w);
+            title.appendChild(document.createTextNode(' '));
           }
-          canvas.classList.add('gone');
-          await wait(600);
-          canvas.remove();
-          title.remove();
-        }
 
-        run();
+          const letterCount = i;
+          const stagger = reduce ? 0 : 42;
+          const rise = reduce ? 600 : 1100;
+          // Hold long enough for the light sweep on the last letter to finish.
+          const titleDone = letterCount * stagger + rise + (reduce ? 400 : 2400);
+
+          let skipped = false;
+          let resolveSkip;
+          const skip = new Promise((r) => (resolveSkip = r));
+          const onSkip = () => {
+            skipped = true;
+            resolveSkip();
+          };
+          addEventListener('pointerdown', onSkip, { once: true });
+          addEventListener('keydown', onSkip, { once: true });
+
+          const race = (ms) => Promise.race([wait(ms), skip]);
+
+          // Progressive "low quality -> full quality" reveal: paint the photo at a coarse
+          // resolution and refine it toward the real image, then hand off to the <img>.
+          function pixelReveal(duration) {
+            // Layout offsets ignore the parent's in-flight scale transform.
+            const { offsetLeft: x, offsetTop: y, offsetWidth: w, offsetHeight: h } = img;
+            const dpr = Math.min(devicePixelRatio || 1, 2);
+            canvas.style.left = x + 'px';
+            canvas.style.top = y + 'px';
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+
+            const ctx = canvas.getContext('2d');
+            const scratch = document.createElement('canvas');
+            const sctx = scratch.getContext('2d');
+            if (!ctx || !sctx) return Promise.resolve();
+
+            // Discrete steps, geometric in resolution, so it reads like a progressive
+            // image loading: 6 columns -> ... -> full resolution.
+            const steps = 12;
+            const minCols = 6;
+            const maxCols = canvas.width;
+            const start = performance.now();
+            let lastStep = -1;
+
+            return new Promise((done) => {
+              function frame(now) {
+                const t = Math.min(1, (now - start) / duration);
+                const step = Math.min(steps - 1, Math.floor(t * steps));
+
+                if (step !== lastStep) {
+                  lastStep = step;
+                  const cols = Math.round(minCols * Math.pow(maxCols / minCols, step / (steps - 1)));
+                  const rows = Math.max(1, Math.round(cols * (canvas.height / canvas.width)));
+
+                  scratch.width = cols;
+                  scratch.height = rows;
+                  sctx.imageSmoothingEnabled = true;
+                  sctx.drawImage(img, 0, 0, cols, rows);
+
+                  ctx.imageSmoothingEnabled = false;
+                  ctx.clearRect(0, 0, canvas.width, canvas.height);
+                  ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
+                }
+
+                if (t < 1 && !skipped) requestAnimationFrame(frame);
+                else done();
+              }
+              requestAnimationFrame(frame);
+            });
+          }
+
+          async function run() {
+            const ready = img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+
+            // Let the headline typeface arrive before the letters start moving.
+            if (document.fonts && document.fonts.ready) {
+              await Promise.race([document.fonts.ready, wait(1500)]);
+            }
+            root.classList.add('ready');
+
+            await race(titleDone);
+            title.classList.add('out');
+            await Promise.all([race(reduce ? 350 : 700), ready]);
+
+            photo.classList.add('in');
+            if (!reduce && !skipped && img.naturalWidth) {
+              try {
+                await pixelReveal(2600);
+              } catch (e) {}
+            }
+            canvas.classList.add('gone');
+            await wait(600);
+            canvas.remove();
+            title.remove();
+          }
+
+          run().catch(fail);
+        } catch (e) {
+          fail();
+        }
       })();
     </script>
   </body>
